@@ -1,6 +1,6 @@
 from __future__ import division, print_function
 
-from abc import abstractmethod
+from abc import abstractmethod, ABCMeta
 from collections import defaultdict
 from datetime import datetime
 import random
@@ -34,7 +34,8 @@ class Network(object):
         activations_function,
         cost,
         stopping_criteria,
-        learning_rate=0.1,
+        learning_rate,
+        update_algorithm,
         weight_initializer=initialize_input_dim_normalized_weights,
         regularization=None,
     ):
@@ -42,6 +43,7 @@ class Network(object):
         self.sizes = sizes
         self.stopping_criteria = stopping_criteria
         self.learning_rate = learning_rate
+        self.update_algorithm = update_algorithm
         self.biases = self.initialize_biases(self.sizes)
         self.weights = weight_initializer(self.sizes)
         self.activation_function = activations_function
@@ -58,7 +60,7 @@ class Network(object):
             a = self.activation_function.apply(np.dot(w, a) + b)
         return a
 
-    def sgd(self, training_data, validation_data, mini_batch_size, test_data=None, lmbda=5):
+    def sgd(self, training_data, validation_data, mini_batch_size, test_data=None):
         if test_data:
             n_test = len(test_data)
         n = len(training_data)
@@ -71,7 +73,7 @@ class Network(object):
                 training_data[k:k+mini_batch_size] for k in xrange(0, n, mini_batch_size)
             ]
             for mini_batch in mini_batches:
-                self.update_mini_batch(mini_batch, learning_rate, lmbda, len(training_data))
+                self.update_mini_batch(mini_batch, learning_rate, len(training_data))
 
             self.log['training_data_accuracy'].append(self.evaluate(training_data) / len(training_data))
             self.log['validation_data_accuracy'].append(self.evaluate(validation_data) / len(validation_data))
@@ -90,7 +92,7 @@ class Network(object):
                 print("Epoch {0} complete".format(epoch))
             epoch += 1
 
-    def update_mini_batch(self, mini_batch, learning_rate, lmbda, n):
+    def update_mini_batch(self, mini_batch, learning_rate, training_set_size):
         nabla_w = [np.zeros(w.shape) for w in self.weights]
         nabla_b = [np.zeros(b.shape) for b in self.biases]
         xs, ys = map(
@@ -100,20 +102,14 @@ class Network(object):
         delta_nabla_b, delta_nabla_w = self.backprop(xs, ys)
         nabla_b = [nb+dnb for nb, dnb in zip(nabla_b, delta_nabla_b)]
         nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
-        if self.regularization is None:
-            self.weights = [w - (learning_rate/len(mini_batch)*nw) for w, nw in zip(self.weights, nabla_w)]
-        elif self.regularization == 'L1':
-            self.weights = [
-                w - np.sign(w)*learning_rate*lmbda/n - learning_rate/len(mini_batch)*nw for w, nw in
-                zip(self.weights, nabla_w)
-            ]
-        elif self.regularization == 'L2':
-            self.weights = [
-                (1 - learning_rate*lmbda/n)*w - (learning_rate/len(mini_batch)*nw) for w, nw in
-                zip(self.weights, nabla_w)
-            ]
-        else:
-            raise NotImplementedError("Regularization method not implemented")
+
+        self.weights = self.update_algorithm(
+            self.weights,
+            training_set_size,
+            learning_rate,
+            len(mini_batch),
+            nabla_w
+        )
         self.biases = [b - (learning_rate/len(mini_batch)*nb) for b, nb in zip(self.biases, nabla_b)]
 
     def backprop(self, x, y):
@@ -180,6 +176,74 @@ class Network(object):
     @staticmethod
     def cost_derivative(y, a):
         return a - y
+
+
+class UpdateAlgorithm(object):
+
+    __metaclass__ = ABCMeta
+
+    def __call__(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        return [w + delta_w for w, delta_w in zip(
+            weights,
+            self.delta_w(
+                weights,
+                training_set_size,
+                learning_rate,
+                mini_batch_size,
+                nabla_w
+            )
+        )]
+
+    @abstractmethod
+    def delta_w(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        pass
+
+
+class BasicUpdateAlgorithm(UpdateAlgorithm):
+    def delta_w(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        return [-(learning_rate/mini_batch_size*nw) for nw in nabla_w]
+
+
+class L1UpdateAlgorithm(object):
+    def __init__(self, lmbda):
+        self.lmbda = lmbda
+
+
+    def delta_w(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        return [
+            -np.sign(w)*learning_rate*self.lmbda/training_set_size - learning_rate/mini_batch_size*nw for w, nw in
+            zip(weights, nabla_w)
+        ]
+
+
+class L2UpdateAlgorithm(UpdateAlgorithm):
+    def __init__(self, lmbda):
+        self.lmbda = lmbda
+
+    def delta_w(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        return [
+            -w*learning_rate*self.lmbda/training_set_size - learning_rate/mini_batch_size*nw for w, nw in
+            zip(weights, nabla_w)
+        ]
+
+
+class Momentum(UpdateAlgorithm):
+    def __init__(self, momentum, base_algorithm):
+        self.momentum = momentum
+        self.base_algorithm = base_algorithm
+        self.velocity = None
+
+    def delta_w(self, weights, training_set_size, learning_rate, mini_batch_size, nabla_w):
+        if self.velocity is None:
+            self.velocity = np.zeros_like(weights)
+        self.velocity = [self.momentum*v + nabla_w for v, nabla_w in zip(self.velocity, self.base_algorithm.delta_w(
+            weights,
+            training_set_size,
+            learning_rate,
+            mini_batch_size,
+            nabla_w
+        ))]
+        return self.velocity
 
 
 class Activation(object):
@@ -367,45 +431,46 @@ class HalfLRIfNoDecreaseInNEpochs(LearningRate):
 
 
 def main():
-    lmbdas = [0.01, 0.1, 1, 10]
-    logs = []
-    for l in lmbdas:
-        logs.append(run(l))
-    map(
-        lambda log: print(log['validation_data_accuracy']),
-        logs
-    )
-    print("The best lambda was {}".format(
-        lmbdas[
-            np.argmax(
-                map(
-                    lambda log: log['validation_data_accuracy'],
-                    logs
-                )
-            )
-        ]
-    ))
+    pass
+    # lmbdas = [0.01, 0.1, 1, 10]
+    # logs = []
+    # for l in lmbdas:
+    #     logs.append(run(l))
+    # map(
+    #     lambda log: print(log['validation_data_accuracy']),
+    #     logs
+    # )
+    # print("The best lambda was {}".format(
+    #     lmbdas[
+    #         np.argmax(
+    #             map(
+    #                 lambda log: log['validation_data_accuracy'],
+    #                 logs
+    #             )
+    #         )
+    #     ]
+    # ))
 
 
-def run(lmbda):
+def run():
     np.random.seed(0)
     data = load_data_wrapper()
     initial_learning_rate = 0.2
     network = Network(
-        [784, 30, 10],
-        activations_function=ReLU(),
+        [784, 100, 10],
+        activations_function=Sigmoid(),
         cost=CrossEntropy(),
-        stopping_criteria=LearningRateDecreaseLimit(
-            initial_learning_rate=initial_learning_rate,
-            limit=1/2
-        ),
-        learning_rate=HalfLRIfNoDecreaseInNEpochs(
-            monitor_parameter='validation_cost',
-            max_epochs=1,
-            initial_learning_rate=initial_learning_rate
-        ),
-        weight_initializer=initialize_input_dim_normalized_weights,
-        regularization='L2'
+        stopping_criteria=NEpochs(50),#LearningRateDecreaseLimit(
+        #     initial_learning_rate=initial_learning_rate,
+        #     limit=1/2
+        # ),
+        learning_rate=FixedLearningRate(0.01),#HalfLRIfNoDecreaseInNEpochs(
+        #     monitor_parameter='validation_cost',
+        #     max_epochs=1,
+        #     initial_learning_rate=initial_learning_rate
+        # ),
+        update_algorithm=Momentum(momentum=0.5, base_algorithm=L2UpdateAlgorithm(lmbda=5)),
+        weight_initializer=initialize_input_dim_normalized_weights
     )
     t0 = datetime.utcnow()
     network.sgd(
@@ -413,10 +478,9 @@ def run(lmbda):
         validation_data=data[1],
         test_data=data[2],
         mini_batch_size=12,
-        lmbda=lmbda
     )
     print("Total time fast {}".format(datetime.utcnow() - t0))
-    # plot_stats(network)
+    plot_stats(network)
     return network.log
 
 
@@ -442,4 +506,4 @@ def plot_stats(network):
 
 
 if __name__ == '__main__':
-    main()
+    run()
