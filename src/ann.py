@@ -91,6 +91,7 @@ class Network(object):
             else:
                 print("Epoch {0} complete".format(epoch))
             epoch += 1
+        self.save_misclassifications(test_data)
 
     def update_mini_batch(self, mini_batch, learning_rate, training_set_size):
         nabla_w = [np.zeros(w.shape) for w in self.weights]
@@ -141,6 +142,7 @@ class Network(object):
                 zs[i]
             )
 
+        self.log_deltas(deltas)
         dc_dw = []
         dc_db = []
 
@@ -168,6 +170,19 @@ class Network(object):
         y_hats = [self.feedforward(x) for x in xs]
         costs = [self.cost.cost(y, y_hat) for y, y_hat in zip(ys, y_hats)]
         return aggregate_f(costs)
+
+    def log_deltas(self, deltas):
+        for i, d in enumerate(deltas):
+            len_d = np.sqrt(np.sum(np.power(d, 2)))
+            self.log['deltas_{}'.format(i)].append(len_d)
+            #print("Lenght of deltas, layer {}: {}".format(i, len_d))
+
+    def save_misclassifications(self, data):
+        xs, ys = zip(*test_data)
+        y_hats = [np.argmax(self.feedforward(x)) for x in xs]
+        for i, (x, y, y_hat) in enumerate(zip(x, ys, y_hats)):
+            if y_hat != np.argmax(y):
+                pass
 
     @staticmethod
     def squared_error_cost(y, a):
@@ -451,14 +466,16 @@ def main():
     #     ]
     # ))
 
-
 def run():
     np.random.seed(0)
     data = load_data_wrapper()
     initial_learning_rate = 0.2
     network = Network(
-        [784, 100, 10],
-        activations_function=Sigmoid(),
+        [784,
+         30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+         30, 30, 30, 30, 30,
+         10],
+        activations_function=ReLU(),
         cost=CrossEntropy(),
         stopping_criteria=NEpochs(50),#LearningRateDecreaseLimit(
         #     initial_learning_rate=initial_learning_rate,
@@ -501,7 +518,7 @@ def plot_stats(network):
     axs[0].legend()
     axs[2].legend()
     axs[3].legend()
-    plt.savefig("/home/sjosund/Programming/NeuralNets/img/ReLU.png")
+    plt.savefig("/Users/lassolass/Developer/NeuralNets/img/3_hidden_layers.png")
     plt.show()
 
 
