@@ -1,9 +1,10 @@
+# Inspired by https://github.com/fchollet/keras/blob/master/examples/variational_autoencoder.py
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-from keras.models import Sequential, Model
-from keras.layers import Dense, Input, Lambda
-from keras import backend as K
+from keras.models import Model
+from keras.layers import Dense, Input
 from keras import objectives
 
 from mnist_loader import load_data_wrapper

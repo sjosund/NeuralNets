@@ -1,3 +1,4 @@
+# Code from https://github.com/fchollet/keras/blob/master/examples/variational_autoencoder.py
 import numpy as np
 import matplotlib.pyplot as plt
 
