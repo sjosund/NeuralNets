@@ -40,8 +40,8 @@ def main():
     combination_image = tf.Variable(
         tf.truncated_normal(
             shape=shape,
-            mean=1,
-            stddev=0.5
+            mean=0,
+            stddev=1
         ),
         # content_image,
         dtype='float32'
